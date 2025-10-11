@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =================================================================
+// 1. نماذج المستخدمين والأدوار
+// =================================================================
+
+enum Role {
+  admin
+  seller
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String 
+  role         Role      @default(seller)
+  name         String?   // <--- يجب أن يكون هذا السطر موجوداً
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  shifts       Shift[]
+  sales        Sale[]
+
+  @@map("users")
+}
+
+// =================================================================
+// 2. نماذج المنتجات والمخزون
+// =================================================================
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  products    Product[] 
+
+  @@map("categories")
+}
+
+model Product {
+  id            String    @id @default(cuid())
+  name          String    @unique
+  description   String?
+  price         Decimal   @db.Money  
+  imageUrl      String?
+  stock         Int       @default(0) 
+  isAvailable   Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  categoryId    String
+  category      Category  @relation(fields: [categoryId], references: [id])
+
+  saleItems     SaleItem[]
+
+  @@map("products")
+}
+
+// =================================================================
+// 3. نماذج الورديات والمبيعات
+// =================================================================
+
+// تصنيف الوردية: صباحي أو مسائي
+enum ShiftType { 
+  morning
+  evening
+}
+
+model Shift {
+  id             String    @id @default(cuid())
+  sellerId       String
+  seller         User      @relation(fields: [sellerId], references: [id])
+  startTime      DateTime  @default(now())
+  endTime        DateTime?
+  // تم تصحيح النوع ليصبح Enum
+  shiftType      ShiftType 
+  startingCash   Decimal   @db.Money @default(0)
+  endingCash     Decimal?  @db.Money
+  
+  sales          Sale[]
+
+  @@map("shifts")
+}
+
+// نموذج المبيعات (Sale)
+model Sale {
+  id             String      @id @default(cuid())
+  saleTime       DateTime    @default(now())
+  
+  sellerId       String
+  seller         User        @relation(fields: [sellerId], references: [id])
+  shiftId        String
+  shift          Shift       @relation(fields: [shiftId], references: [id])
+  
+  subtotal       Decimal     @db.Money
+  vatAmount      Decimal     @db.Money
+  feeAmount      Decimal     @db.Money
+  totalAmount    Decimal     @db.Money
+  
+  paymentMethod  String      // 'cash', 'mada', 'visa_master'
+  
+  items          SaleItem[]
+
+  @@map("sales")
+}
+
+// نموذج أصناف المبيعات (SaleItem)
+model SaleItem {
+  id             String      @id @default(cuid())
+  
+  saleId         String
+  sale           Sale        @relation(fields: [saleId], references: [id])
+  productId      String
+  product        Product     @relation(fields: [productId], references: [id])
+  
+  productName    String
+  priceAtSale    Decimal     @db.Money
+  quantity       Int
+  // 🏆 الحقل المطلوب!
+  subtotal       Decimal     @db.Money 
+  
+  @@map("sale_items")
+}
