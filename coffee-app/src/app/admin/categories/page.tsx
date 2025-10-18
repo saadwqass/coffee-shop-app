@@ -6,6 +6,7 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { useCategoryStore, Category } from '@/store/categoryStore'; 
 import { fetchData } from '@/lib/api'; 
 import { Plus, Trash2, Edit, Save, X } from 'lucide-react';
+import './categories.css'; 
 
 // ---------------------------------------------------------------------
 // 1. مكون صفحة إدارة الأصناف الفعلية
@@ -28,6 +29,7 @@ const AdminCategoriesContent = () => {
     const [isAdding, setIsAdding] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
+    const [individualLoading, setIndividualLoading] = useState<string | null>(null); // 🆕 تحميل فردي
 
     // 🏆 نستخدم useCallback لتخزين دالة الجلب وتجنب إعادة الإنشاء
     const memoizedFetchCategories = useCallback(() => {
@@ -55,6 +57,9 @@ const AdminCategoriesContent = () => {
             
             addCategoryLocally(newCategory);
             setNewCategoryName('');
+            
+            // 🆕 إعادة جلب البيانات للتأكد من المزامنة
+            await fetchCategories();
         } catch (err: any) {
             setError(err.message || 'فشل إضافة الصنف.');
         } finally {
@@ -64,10 +69,9 @@ const AdminCategoriesContent = () => {
 
     // 🏆 دالة تعديل اسم صنف
     const handleUpdateCategory = async (id: string) => {
-        if (!editingName.trim() || loading) return;
+        if (!editingName.trim()) return;
 
-        // لا داعي لضبط حالة تحميل عامة إذا كنا نعدل عنصر واحد
-        // يمكننا استخدام حالة 'isSubmitting' هنا إذا أردنا
+        setIndividualLoading(id); // 🆕 تحميل فردي
         setError(null);
         try {
             await fetchData(
@@ -78,8 +82,13 @@ const AdminCategoriesContent = () => {
             
             updateCategoryLocally(id, editingName);
             setEditingId(null);
+            
+            // 🆕 إعادة جلب البيانات للتأكد من المزامنة
+            await fetchCategories();
         } catch (err: any) {
             setError(err.message || 'فشل تعديل الصنف.');
+        } finally {
+            setIndividualLoading(null); // 🆕 إنهاء التحميل الفردي
         }
     };
 
@@ -87,7 +96,7 @@ const AdminCategoriesContent = () => {
     const handleDeleteCategory = async (id: string) => {
         if (!window.confirm('هل أنت متأكد من حذف هذا الصنف؟')) return;
 
-        // يمكن استخدام حالة تحميل هنا بشكل خاص
+        setIndividualLoading(id); // 🆕 تحميل فردي
         setError(null);
         try {
             await fetchData(
@@ -96,8 +105,19 @@ const AdminCategoriesContent = () => {
             );
             
             deleteCategoryLocally(id);
+            
+            // 🆕 إعادة جلب البيانات للتأكد من المزامنة
+            await fetchCategories();
         } catch (err: any) {
-            setError(err.message || 'فشل حذف الصنف. تأكد من عدم وجود منتجات مرتبطة به.');
+            // 🆕 معالجة أفضل لرسائل الخطأ
+            const errorMessage = err.message || 'فشل حذف الصنف.';
+            if (errorMessage.includes('contains products')) {
+                setError('لا يمكن حذف الصنف لأنه يحتوي على منتجات. يرجى نقل أو حذف المنتجات أولاً.');
+            } else {
+                setError(errorMessage);
+            }
+        } finally {
+            setIndividualLoading(null); // 🆕 إنهاء التحميل الفردي
         }
     };
 
@@ -107,6 +127,17 @@ const AdminCategoriesContent = () => {
         setEditingName(category.name);
     };
 
+    // 🆕 دالة إلغاء التعديل
+    const cancelEditing = () => {
+        setEditingId(null);
+        setEditingName('');
+    };
+
+    // 🆕 التحقق إذا كان العنصر قيد المعالجة
+    const isItemProcessing = (id: string) => {
+        return individualLoading === id || loading;
+    };
+
     return (
         <div className="p-8 bg-gray-50 min-h-screen">
             <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-2 text-right">
@@ -114,8 +145,16 @@ const AdminCategoriesContent = () => {
             </h1>
 
             {/* رسائل الحالة */}
-            {error && <div dir="rtl" className="p-4 mb-4 bg-red-100 text-red-700 rounded-lg text-right">{error}</div>}
-            {loading && <div dir="rtl" className="p-4 mb-4 bg-blue-100 text-blue-700 rounded-lg text-right">جاري التحميل...</div>}
+            {error && (
+                <div dir="rtl" className="p-4 mb-4 bg-red-100 text-red-700 rounded-lg text-right border border-red-200">
+                    {error}
+                </div>
+            )}
+            {loading && (
+                <div dir="rtl" className="p-4 mb-4 bg-blue-100 text-blue-700 rounded-lg text-right border border-blue-200">
+                    جاري تحميل الأصناف...
+                </div>
+            )}
 
             {/* نموذج إضافة صنف جديد */}
             <form onSubmit={handleAddCategory} className="flex gap-4 mb-8 bg-white p-4 rounded-xl shadow-lg border border-gray-100" dir="rtl">
@@ -124,16 +163,26 @@ const AdminCategoriesContent = () => {
                     placeholder="اسم الصنف الجديد (مثل: مشروبات باردة)"
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
-                    className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 text-right"
+                    className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 text-right transition duration-150"
                     required
+                    disabled={isAdding}
                 />
                 <button
                     type="submit"
                     disabled={isAdding || loading}
-                    className="flex items-center justify-center px-6 py-3 bg-amber-600 text-white font-semibold rounded-lg shadow-md hover:bg-amber-700 disabled:bg-gray-400 transition duration-150"
+                    className="flex items-center justify-center px-6 py-3 bg-amber-600 text-white font-semibold rounded-lg shadow-md hover:bg-amber-700 disabled:bg-gray-400 transition duration-150 min-w-[140px]"
                 >
-                    <Plus className="w-5 h-5 mr-2" />
-                    {isAdding ? 'جاري الإضافة...' : 'إضافة صنف'}
+                    {isAdding ? (
+                        <>
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                            جاري الإضافة...
+                        </>
+                    ) : (
+                        <>
+                            <Plus className="w-5 h-5 mr-2" />
+                            إضافة صنف
+                        </>
+                    )}
                 </button>
             </form>
 
@@ -143,7 +192,9 @@ const AdminCategoriesContent = () => {
                     {categories.map((category) => (
                         <div 
                             key={category.id} 
-                            className="flex justify-between items-center p-4 border-b last:border-b-0 hover:bg-gray-50 rounded-lg transition duration-100"
+                            className={`flex justify-between items-center p-4 border-b last:border-b-0 hover:bg-gray-50 rounded-lg transition duration-150 ${
+                                isItemProcessing(category.id) ? 'opacity-60' : ''
+                            }`}
                         >
                             {editingId === category.id ? (
                                 // وضع التعديل
@@ -152,13 +203,18 @@ const AdminCategoriesContent = () => {
                                         type="text"
                                         value={editingName}
                                         onChange={(e) => setEditingName(e.target.value)}
-                                        className="flex-grow p-2 border border-blue-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-right"
+                                        className="flex-grow p-2 border border-blue-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-right transition duration-150"
+                                        disabled={individualLoading === category.id}
+                                        autoFocus
                                     />
                                 </div>
                             ) : (
                                 // وضع العرض العادي
                                 <span className="text-lg font-medium text-gray-800">
                                     {category.name}
+                                    {individualLoading === category.id && (
+                                        <span className="text-sm text-amber-600 mr-2"> ● جاري المعالجة...</span>
+                                    )}
                                 </span>
                             )}
 
@@ -168,38 +224,46 @@ const AdminCategoriesContent = () => {
                                     <>
                                         <button
                                             onClick={() => handleUpdateCategory(category.id)}
-                                            disabled={loading || isAdding} // تعطيل أثناء العمليات الأخرى
-                                            className="p-2 bg-green-500 text-white rounded-full hover:bg-green-600 disabled:opacity-50"
-                                            title="حفظ"
+                                            disabled={individualLoading === category.id || !editingName.trim()}
+                                            className="p-2 bg-green-500 text-white rounded-full hover:bg-green-600 disabled:opacity-50 transition duration-150"
+                                            title="حفظ التعديلات"
                                         >
-                                            <Save className="w-5 h-5" />
+                                            {individualLoading === category.id ? (
+                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                            ) : (
+                                                <Save className="w-4 h-4" />
+                                            )}
                                         </button>
                                         <button
-                                            onClick={() => setEditingId(null)}
-                                            disabled={loading || isAdding}
-                                            className="p-2 bg-gray-500 text-white rounded-full hover:bg-gray-600 disabled:opacity-50"
-                                            title="إلغاء"
+                                            onClick={cancelEditing}
+                                            disabled={individualLoading === category.id}
+                                            className="p-2 bg-gray-500 text-white rounded-full hover:bg-gray-600 disabled:opacity-50 transition duration-150"
+                                            title="إلغاء التعديل"
                                         >
-                                            <X className="w-5 h-5" />
+                                            <X className="w-4 h-4" />
                                         </button>
                                     </>
                                 ) : (
                                     <>
                                         <button
                                             onClick={() => startEditing(category)}
-                                            disabled={loading || isAdding}
-                                            className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:opacity-50"
-                                            title="تعديل"
+                                            disabled={isItemProcessing(category.id) || editingId !== null}
+                                            className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:opacity-50 transition duration-150"
+                                            title="تعديل الصنف"
                                         >
-                                            <Edit className="w-5 h-5" />
+                                            <Edit className="w-4 h-4" />
                                         </button>
                                         <button
                                             onClick={() => handleDeleteCategory(category.id)}
-                                            disabled={loading || isAdding}
-                                            className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 disabled:opacity-50"
-                                            title="حذف"
+                                            disabled={isItemProcessing(category.id) || editingId !== null}
+                                            className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 disabled:opacity-50 transition duration-150"
+                                            title="حذف الصنف"
                                         >
-                                            <Trash2 className="w-5 h-5" />
+                                            {individualLoading === category.id ? (
+                                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                            ) : (
+                                                <Trash2 className="w-4 h-4" />
+                                            )}
                                         </button>
                                     </>
                                 )}
@@ -207,7 +271,9 @@ const AdminCategoriesContent = () => {
                         </div>
                     ))}
                     {categories.length === 0 && !loading && !error && (
-                        <p className="text-center text-gray-500 py-4">لا توجد أصناف حالياً. قم بإضافة صنف جديد.</p>
+                        <p className="text-center text-gray-500 py-8 text-lg">
+                            لا توجد أصناف حالياً. قم بإضافة صنف جديد لبدء التنظيم.
+                        </p>
                     )}
                 </div>
             </div>

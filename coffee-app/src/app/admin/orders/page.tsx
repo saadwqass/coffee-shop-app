@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import { fetchData } from '@/lib/api';
-import { Loader2, Package, Search, CheckCircle, Clock, XCircle, ShoppingBag, RotateCw } from 'lucide-react'; // استيراد RotateCw
+import { Loader2, Package, Search, CheckCircle, Clock, XCircle, ShoppingBag, RotateCw } from 'lucide-react';
+import './orders.css';
 
 // ---------------------------------------------------------------------
 // 1. تحديد أنواع البيانات
@@ -39,7 +40,6 @@ interface OrderTableProps {
 }
 
 const OrderTable: React.FC<OrderTableProps> = ({ orders, updateOrderStatus, isUpdating }) => {
-    // 💡 دالة مساعدة لتحويل حالة الطلب إلى نص ولون
     const getStatusDisplay = (status: OrderStatus) => {
         switch (status) {
             case 'PENDING': return { text: 'بانتظار التحضير', color: 'bg-yellow-100 text-yellow-800', icon: Clock };
@@ -51,7 +51,6 @@ const OrderTable: React.FC<OrderTableProps> = ({ orders, updateOrderStatus, isUp
         }
     };
 
-    // 💡 عرض تفاصيل الطلب (Items)
     const OrderItemsList: React.FC<{ items: OrderItem[] }> = ({ items }) => (
         <ul className="list-disc pr-5 mt-1 text-sm text-gray-600">
             {items.map((item) => (
@@ -96,7 +95,6 @@ const OrderTable: React.FC<OrderTableProps> = ({ orders, updateOrderStatus, isUp
                             orders.map((order) => {
                                 const { text, color, icon: StatusIcon } = getStatusDisplay(order.status);
                                 const isActionDisabled = isUpdating || order.status === 'COMPLETED' || order.status === 'CANCELED';
-                                // 🌟 التحسين: تمييز الطلبات العاجلة (PENDING)
                                 const isUrgent = order.status === 'PENDING' || order.status === 'PREPARING';
                                 
                                 return (
@@ -119,14 +117,17 @@ const OrderTable: React.FC<OrderTableProps> = ({ orders, updateOrderStatus, isUp
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-800">
                                             <OrderItemsList items={order.items} />
-                                            <div className="text-xs text-gray-500 mt-1">طريقة: {order.paymentMethod === 'cash' ? 'نقداً' : 'بطاقة'}</div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                طريقة: {order.paymentMethod === 'cash' ? 'نقداً' : order.paymentMethod === 'mada' ? 'مدى' : 'فيزا/ماستر'}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            {/* زر تحديث الحالة */}
                                             {order.status !== 'COMPLETED' && order.status !== 'CANCELED' && (
                                                 <button
                                                     onClick={() => {
-                                                        const nextStatus: OrderStatus = order.status === 'PENDING' ? 'PREPARING' : 'READY';
+                                                        const nextStatus: OrderStatus = 
+                                                            order.status === 'PENDING' ? 'PREPARING' : 
+                                                            order.status === 'PREPARING' ? 'READY' : 'COMPLETED';
                                                         updateOrderStatus(order.id, nextStatus);
                                                     }}
                                                     disabled={isActionDisabled}
@@ -135,19 +136,15 @@ const OrderTable: React.FC<OrderTableProps> = ({ orders, updateOrderStatus, isUp
                                                         ${isActionDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700'}
                                                     `}
                                                 >
-                                                    {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : order.status === 'PENDING' ? 'بدء التحضير' : 'جعله جاهزاً'}
-                                                </button>
-                                            )}
-                                            {order.status === 'READY' && (
-                                                <button
-                                                    onClick={() => updateOrderStatus(order.id, 'COMPLETED')}
-                                                    disabled={isActionDisabled}
-                                                    className={`
-                                                        mt-2 block px-4 py-2 rounded-lg text-white text-xs font-semibold transition duration-150
-                                                        ${isActionDisabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}
-                                                    `}
-                                                >
-                                                    تسليم وإكمال
+                                                    {isUpdating ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : order.status === 'PENDING' ? (
+                                                        'بدء التحضير'
+                                                    ) : order.status === 'PREPARING' ? (
+                                                        'جعله جاهزاً'
+                                                    ) : (
+                                                        'تسليم وإكمال'
+                                                    )}
                                                 </button>
                                             )}
                                         </td>
@@ -172,24 +169,23 @@ const OrdersContent = () => {
     const [error, setError] = useState<string | null>(null);
     const [filterStatus, setFilterStatus] = useState<string>('ALL');
     const [isUpdating, setIsUpdating] = useState(false);
-    // 🌟 التحسين: حالة لتتبع عدد الطلبات التي تم جلبها آخر مرة
     const [lastFetchCount, setLastFetchCount] = useState(0); 
     const [newOrdersIndicator, setNewOrdersIndicator] = useState(0);
+    
+    // 🛠️ الإصلاح: استخدام useRef لتخزين أحدث إصدار من fetchOrders
+    const fetchOrdersRef = useRef<((isManualRefresh?: boolean) => Promise<void>) | null>(null);
 
-    // 💡 دالة فرز الطلبات (مفصولة لتجنب التكرار)
     const sortOrders = (data: Order[]) => {
         return data.sort((a, b) => {
-            // ترتيب الحالات: الجاهز أولاً، ثم قيد التحضير، ثم الانتظار، ثم المكتمل/الملغي
             const statusOrder = ['READY', 'PREPARING', 'PENDING', 'COMPLETED', 'CANCELED'];
             if (a.status !== b.status) {
                 return statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status);
             }
-            // الأحدث أولاً
             return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         });
     };
     
-    // 💡 دالة جلب الطلبات من الـ API (مع استخدام useCallback)
+    // 🛠️ الإصلاح: استخدام useRef بدلاً من useCallback للتبعية
     const fetchOrders = useCallback(async (isManualRefresh = false) => {
         setLoading(true);
         setError(null);
@@ -197,11 +193,10 @@ const OrdersContent = () => {
             const data: Order[] = await fetchData('/api/admin/sales');
             const sortedData = sortOrders(data);
             
-            // 🌟 التحسين: مقارنة عدد الطلبات لتحديد الطلبات الجديدة
             if (!isManualRefresh && sortedData.length > lastFetchCount && lastFetchCount !== 0) {
                 setNewOrdersIndicator(sortedData.length - lastFetchCount);
             } else if (isManualRefresh) {
-                setNewOrdersIndicator(0); // إزالة الإشعار عند التحديث اليدوي
+                setNewOrdersIndicator(0);
             }
 
             setOrders(sortedData);
@@ -212,15 +207,18 @@ const OrdersContent = () => {
         } finally {
             setLoading(false);
         }
-    }, [lastFetchCount]); // يعتمد على lastFetchCount لمقارنة العدد
+    }, [lastFetchCount]);
 
-    // 💡 دالة تحديث حالة الطلب
+    // 🛠️ الإصلاح: تحديث المرجع عند تغيير الدالة
+    useEffect(() => {
+        fetchOrdersRef.current = fetchOrders;
+    }, [fetchOrders]);
+
     const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
         setIsUpdating(true);
         try {
             await fetchData(`/api/admin/sales/${orderId}/status`, 'PUT', { status: newStatus });
             
-            // تحديث الحالة محلياً ثم إعادة فرز الطلبات لضمان انتقالها للمكان الصحيح في الجدول
             setOrders(prevOrders => {
                 const updatedOrders = prevOrders.map(order => 
                     order.id === orderId ? { ...order, status: newStatus } : order
@@ -235,15 +233,23 @@ const OrdersContent = () => {
         }
     };
 
-    // جلب الطلبات عند تحميل المكون
+    // 🛠️ الإصلاح: استخدام fetchOrdersRef.current بدلاً من fetchOrders مباشرة
     useEffect(() => {
-        fetchOrders(true); // جلب أولي
-        // 💡 تحديث الطلبات كل 30 ثانية (التحديث التلقائي)
-        const intervalId = setInterval(() => fetchOrders(false), 30000); 
-        return () => clearInterval(intervalId); // التنظيف
-    }, [fetchOrders]);
+        // الجلب الأولي
+        if (fetchOrdersRef.current) {
+            fetchOrdersRef.current(true);
+        }
 
-    // تصفية الطلبات بناءً على الحالة
+        // التحديث التلقائي كل 30 ثانية
+        const intervalId = setInterval(() => {
+            if (fetchOrdersRef.current) {
+                fetchOrdersRef.current(false);
+            }
+        }, 30000);
+        
+        return () => clearInterval(intervalId);
+    }, []); // ✅ إزالة التبعيات - لن يتغير بعد التحميل الأولي
+
     const filteredOrders = useMemo(() => {
         if (filterStatus === 'ALL') return orders;
         return orders.filter(order => order.status === filterStatus);
@@ -261,11 +267,27 @@ const OrdersContent = () => {
     const dismissNewOrdersAlert = () => setNewOrdersIndicator(0);
     
     if (loading && orders.length === 0) {
-        return <div className="text-center p-10 text-lg flex items-center justify-center h-screen"><Loader2 className="w-6 h-6 animate-spin ml-2" /> جاري تحميل الطلبات...</div>;
+        return (
+            <div className="text-center p-10 text-lg flex items-center justify-center h-screen">
+                <Loader2 className="w-6 h-6 animate-spin ml-2" /> 
+                جاري تحميل الطلبات...
+            </div>
+        );
     }
 
     if (error) {
-        return <div className="text-center p-10 text-red-600">خطأ: {error}</div>;
+        return (
+            <div className="text-center p-10 text-red-600 bg-red-50 rounded-lg mx-4">
+                <p className="font-semibold">خطأ في تحميل الطلبات</p>
+                <p className="text-sm mt-2">{error}</p>
+                <button 
+                    onClick={() => fetchOrdersRef.current?.(true)}
+                    className="mt-4 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
+                >
+                    إعادة المحاولة
+                </button>
+            </div>
+        );
     }
 
     return (
@@ -275,20 +297,18 @@ const OrdersContent = () => {
                 لوحة تتبع الطلبات
             </h1>
             
-            {/* 🌟 التحسين: إشعار الطلبات الجديدة */}
             {newOrdersIndicator > 0 && (
-                <div className="p-4 mb-4 bg-amber-500 text-white rounded-xl shadow-lg flex justify-between items-center animate-bounce-once">
-                    <span>🔔 لديك **{newOrdersIndicator}** طلب جديد بانتظار التحضير!</span>
+                <div className="p-4 mb-4 bg-amber-500 text-white rounded-xl shadow-lg flex justify-between items-center animate-pulse">
+                    <span>🔔 لديك <strong>{newOrdersIndicator}</strong> طلب جديد بانتظار التحضير!</span>
                     <button 
                         onClick={dismissNewOrdersAlert} 
                         className="text-sm font-semibold underline opacity-90 hover:opacity-100 p-1 rounded-md transition-colors hover:bg-amber-600"
                     >
-                        تمت المشاهدة (إزالة الإشعار)
+                        تمت المشاهدة
                     </button>
                 </div>
             )}
             
-            {/* أداة التصفية والتحديث اليدوي */}
             <div className="mb-6 flex flex-wrap items-center gap-4 p-4 bg-white rounded-xl shadow-md">
                 <Search className="w-5 h-5 text-gray-500" />
                 <label htmlFor="status-filter" className="font-medium text-gray-700">تصفية حسب الحالة:</label>
@@ -303,9 +323,8 @@ const OrdersContent = () => {
                     ))}
                 </select>
                 
-                {/* 🌟 التحسين: زر التحديث اليدوي */}
                 <button 
-                    onClick={() => fetchOrders(true)} 
+                    onClick={() => fetchOrdersRef.current?.(true)} 
                     disabled={loading || isUpdating}
                     className="flex items-center px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-lg shadow-sm hover:bg-gray-300 disabled:opacity-50 transition mr-auto"
                 >
@@ -318,7 +337,6 @@ const OrdersContent = () => {
                 </span>
             </div>
             
-            {/* الجدول */}
             <div className="flex-grow overflow-y-auto">
                 <OrderTable 
                     orders={filteredOrders} 
@@ -329,7 +347,6 @@ const OrdersContent = () => {
         </div>
     );
 };
-
 
 // ---------------------------------------------------------------------
 // 4. حماية المسار والتصدير

@@ -1,9 +1,7 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* تعيين الخط الأساسي لكافة النصوص */
-body {
-  font-family: 'Inter', Arial, "Helvetica Neue", Helvetica, sans-serif, 'Noto Sans Arabic', sans-serif;
-  /* نستخدم 'Inter' كخط افتراضي عالمي وهو خط نظيف ورائع مع Tailwind */
-}
+/* 🎯 هذا السطر لضمان إعادة المعالجة */
+/* Tailwind Reload Check */

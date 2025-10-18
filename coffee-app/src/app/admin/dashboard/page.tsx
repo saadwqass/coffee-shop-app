@@ -11,6 +11,7 @@ import { useCategoryStore } from '@/store/categoryStore';
 // الآن أصبحنا نستورد fetchData الحقيقية التي أرسلتها
 import { fetchData } from '@/lib/api'; 
 import { LayoutDashboard, Package, Coffee, Users, DollarSign, BarChart, Sun, Moon } from 'lucide-react';
+import './dashboard.css';
 
 // ---------------------------------------------------------------------
 // 1. تعريف الأنواع الجديدة (المتطابقة مع استجابة الـ API)
